@@ -27,6 +27,23 @@ MAX_VIDEO_LEN = 40  # we overwrite this in the code below
 
 MJ_ENV_NAMES = ["Ant-v4", "Walker2d-v4", "HalfCheetah-v4", "Hopper-v4"]
 
+def replace_policy_action_with_expert_action(paths, expert_policy):
+    """
+    Replaces the actions in paths with the actions from an expert policy.
+
+    Args:
+        paths: a list of dictionaries, each representing a rollout
+        expert_policy: a policy whose get_action function returns actions
+
+    Returns:
+        paths: a list of dictionaries, each representing a rollout
+    """
+    for path in paths:
+        # query the expert policy for actions
+        path['action'] = expert_policy.get_action(path['observation'])
+
+    return paths
+
 
 def run_training_loop(params):
     """
@@ -56,6 +73,7 @@ def run_training_loop(params):
     # Set logger attributes
     log_video = True
     log_metrics = True
+    log_hyperparams = True # logging for choosing the best hyperparameters
 
     #############
     ## ENV
@@ -132,7 +150,8 @@ def run_training_loop(params):
             # TODO: collect `params['batch_size']` transitions
             # HINT: use utils.sample_trajectories
             # TODO: implement missing parts of utils.sample_trajectory
-            paths, envsteps_this_batch = TODO
+            paths, envsteps_this_batch = utils.sample_trajectories(
+                env, actor, params['batch_size'], params['ep_len'])
 
             # relabel the collected obs with actions from a provided expert policy
             if params['do_dagger']:
@@ -141,7 +160,7 @@ def run_training_loop(params):
                 # TODO: relabel collected obsevations (from our policy) with labels from expert policy
                 # HINT: query the policy (using the get_action function) with paths[i]["observation"]
                 # and replace paths[i]["action"] with these expert labels
-                paths = TODO
+                paths = replace_policy_action_with_expert_action(paths, expert_policy)
 
         total_envsteps += envsteps_this_batch
         # add collected data to replay buffer
@@ -157,11 +176,14 @@ def run_training_loop(params):
           # HINT2: use np.random.permutation to sample random indices
           # HINT3: return corresponding data points from each array (i.e., not different indices from each array)
           # for imitation learning, we only need observations and actions.  
-          ob_batch, ac_batch = TODO
+            idx = np.random.permutation(len(replay_buffer))[:params['train_batch_size']]
+            ob_batch, ac_batch = replay_buffer.obs[idx], replay_buffer.acs[idx]
+            ob_batch = torch.tensor(ob_batch, dtype=torch.float32)
+            ac_batch = torch.tensor(ac_batch, dtype=torch.float32)
 
-          # use the sampled data to train an agent
-          train_log = actor.update(ob_batch, ac_batch)
-          training_logs.append(train_log)
+            # use the sampled data to train an agent
+            train_log = actor.update(ob_batch, ac_batch)
+            training_logs.append(train_log)
 
         # log/save
         print('\nBeginning logging procedure...')
@@ -177,7 +199,7 @@ def run_training_loop(params):
                     eval_video_paths, itr,
                     fps=fps,
                     max_videos_to_save=MAX_NVIDEO,
-                    video_title='eval_rollouts')
+                    video_title=f'eval_rollouts_dagger_{params["seed"]}')
 
         if log_metrics:
             # save eval metrics
@@ -201,6 +223,18 @@ def run_training_loop(params):
 
             logger.flush()
 
+        if log_hyperparams:
+            # log hyperparameters
+            logger.log_scalar(params['batch_size'], 'batch_size', itr)
+            logger.log_scalar(params['eval_batch_size'], 'eval_batch_size', itr)
+            logger.log_scalar(params['train_batch_size'], 'train_batch_size', itr)
+            logger.log_scalar(params['learning_rate'], 'learning_rate', itr)
+            logger.log_scalar(params['num_agent_train_steps_per_iter'], 'num_agent_train_steps_per_iter', itr)
+            logger.log_scalar(params['n_iter'], 'n_iter', itr)
+            logger.log_scalar(params['max_replay_buffer_size'], 'max_replay_buffer_size', itr)
+            logger.log_scalar(params['seed'], 'seed', itr)
+            logger.flush()
+
         if params['save_params']:
             print('\nSaving agent params')
             actor.save('{}/policy_itr_{}.pt'.format(params['logdir'], itr))
@@ -212,7 +246,7 @@ def main():
     parser.add_argument('--expert_policy_file', '-epf', type=str, required=True)  # relative to where you're running this script from
     parser.add_argument('--expert_data', '-ed', type=str, required=True) #relative to where you're running this script from
     parser.add_argument('--env_name', '-env', type=str, help=f'choices: {", ".join(MJ_ENV_NAMES)}', required=True)
-    parser.add_argument('--exp_name', '-exp', type=str, default='pick an experiment name', required=True)
+    parser.add_argument('--exp_name', '-exp', type=str, default='imitation_learning_hw', required=True)
     parser.add_argument('--do_dagger', action='store_true')
     parser.add_argument('--ep_len', type=int)
 
@@ -258,7 +292,7 @@ def main():
     data_path = os.path.join(os.path.dirname(os.path.realpath(__file__)), '../../data')
     if not (os.path.exists(data_path)):
         os.makedirs(data_path)
-    logdir = logdir_prefix + args.exp_name + '_' + args.env_name + '_' + time.strftime("%d-%m-%Y_%H-%M-%S")
+    logdir = logdir_prefix + args.exp_name + '_' + args.env_name + '_' + time.strftime("%d-%m-%Y_%H:%M:%S")
     logdir = os.path.join(data_path, logdir)
     params['logdir'] = logdir
     if not(os.path.exists(logdir)):

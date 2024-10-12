@@ -146,7 +146,7 @@ class MemoryEfficientReplayBuffer:
 
         self.framebuffer[self.framebuffer_idx] = frame
         frame_idx = self.framebuffer_idx
-        self.framebuffer_idx = self.framebuffer_idx + 1
+        self.framebuffer_idx = (self.framebuffer_idx + 1) % self.max_size
 
         return frame_idx
 

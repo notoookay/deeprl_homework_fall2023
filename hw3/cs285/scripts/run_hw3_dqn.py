@@ -103,13 +103,12 @@ def run_training_loop(config: dict, logger: Logger, args: argparse.Namespace):
         if isinstance(replay_buffer, MemoryEfficientReplayBuffer):
             # We're using the memory-efficient replay buffer,
             # so we only insert next_observation (not observation)
-            for i in range(next_observation.shape[0]):
-                replay_buffer.insert(
-                    action=action,
-                    reward=reward,
-                    next_observation=next_observation[i, ...],
-                    done=done,
-                )
+            replay_buffer.insert(
+                action=action,
+                reward=reward,
+                next_observation=next_observation[-1],
+                done=done,
+            )
         else:
             # We're using the regular replay buffer
             replay_buffer.insert(
